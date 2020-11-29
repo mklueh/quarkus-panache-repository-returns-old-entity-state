@@ -1,6 +1,7 @@
 package com.quarkus.demo;
 
 import io.quarkus.test.junit.QuarkusTest;
+import org.hibernate.Hibernate;
 import org.junit.ClassRule;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,6 +16,13 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+/**
+ * Attempts to make accessing the many-to-many access working
+ *
+ * Topics:
+ * 1. Lazy collection not loaded (LazyInitializationException)
+ * 2. PanacheRepository returns old entity state
+ */
 @QuarkusTest
 @Testcontainers
 class UserServiceTest {
@@ -51,6 +59,27 @@ class UserServiceTest {
     void testNoFollowersExist() {
         userService.follow(userA.id, userB.id);
         assertEquals(0, userA.getFollowing().size()); //success
+    }
+
+
+    @Test
+    void testNoFollowersExistByCollection() {
+        userService.follow(userA.id, userB.id);
+        userA = userRepository.findById(userA.id); //Again we need to reload
+        assertEquals(0, userA.getFollowing().size()); //success
+    }
+
+
+    /**
+     * Not working
+     * Recommended way?
+     */
+    @Test
+    @Transactional
+    void testNoFollowersExistByCollectionHibernateInitialize() {
+        userService.follow(userA.id, userB.id);
+        Hibernate.initialize(userA.getFollowers()); //not working
+        assertEquals(0, userA.getFollowing().size()); //fails
     }
 
     /**
@@ -94,7 +123,12 @@ class UserServiceTest {
 
 
     /**
-     * Succeeds
+     * PanacheRepository returns old entity state
+     * The last two assertEquals show the main issue. While the userService.getFollowingCount call executes a select to the database
+     * and shows the right count, the userA.getFollowing().size() call still contains the old follower reference,
+     * although it has been removed again by the userService.unfollow() call.
+     *
+     * It seems that the repository uses some kind of cache that is not invalidated
      */
     @Test
     void testRemoveFollowingWithReloadBeforeAccessingCollection() {
@@ -108,7 +142,10 @@ class UserServiceTest {
         assertEquals(1, userA.getFollowing().size());
         assertEquals(1, userService.getFollowingCount(userA.id));
 
-        userService.unfollow(userA.id, userB.id);
+        /*
+         * We are even telling it to persist and flush explicitly
+         */
+        userService.unfollow(userA.id, userB.id, true);
 
         userA = userRepository.findById(1L);
 

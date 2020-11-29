@@ -16,18 +16,36 @@ public class UserService {
     @Inject
     UserRepository userRepository;
 
-    @Transactional
     public void follow(Long userId, Long toFollowId) {
-        User user = userRepository.findById(userId);
-        User toFollow = userRepository.findById(toFollowId);
-        user.addFollower(toFollow);
+        follow(userId, toFollowId, false);
     }
 
     @Transactional
+    public void follow(Long userId, Long toFollowId, boolean withPersistAndFlush) {
+        User user = userRepository.findById(userId);
+        User toFollow = userRepository.findById(toFollowId);
+        user.addFollower(toFollow);
+
+        if (withPersistAndFlush) {
+            user.persistAndFlush();
+            toFollow.persistAndFlush();
+        }
+    }
+
     public void unfollow(Long userId, Long toUnfollowId) {
+        unfollow(userId, toUnfollowId, false);
+    }
+
+    @Transactional
+    public void unfollow(Long userId, Long toUnfollowId, boolean withPersistAndFlush) {
         User user = userRepository.findById(userId);
         User toFollow = userRepository.findById(toUnfollowId);
         user.removeFollower(toFollow);
+
+        if (withPersistAndFlush) {
+            user.persistAndFlush();
+            toFollow.persistAndFlush();
+        }
     }
 
     @Transactional
