@@ -123,6 +123,10 @@ class UserServiceTest {
         cleanFollowerTable();
     }
 
+    /**
+     * TODO Side-question: Why do tearDown and setUp have to be annotated with @Transactional and not just the cleanFollowerTable method?
+     */
+    //@Transactional
     @SuppressWarnings("SqlWithoutWhere")
     private void cleanFollowerTable() {
         entityManager
