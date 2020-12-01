@@ -2,6 +2,7 @@ package com.quarkus.demo;
 
 import io.quarkus.test.junit.QuarkusTest;
 import org.hibernate.Hibernate;
+import org.hibernate.Session;
 import org.junit.ClassRule;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,7 +13,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import javax.inject.Inject;
 import javax.persistence.EntityManager;
 import javax.transaction.Transactional;
-import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -46,6 +46,10 @@ class UserServiceTest {
     private User userB;
 
 
+    /**
+     * First PersistenceContext. When this method has finished,
+     * all loaded entities are in the detached state
+     */
     @BeforeEach
     @Transactional
     void setUp() {
@@ -55,30 +59,77 @@ class UserServiceTest {
     }
 
 
+    /**
+     * LazyInitializationException
+     */
     @Test
     void testNoFollowersExist() {
-        userService.follow(userA.id, userB.id);
         assertEquals(0, userA.getFollowing().size()); //success
     }
 
 
     @Test
+    @Transactional
     void testNoFollowersExistByCollection() {
-        userService.follow(userA.id, userB.id);
-        userA = userRepository.findById(userA.id); //Again we need to reload
+        userA = userRepository.findById(userA.id);
         assertEquals(0, userA.getFollowing().size()); //success
     }
 
 
     /**
-     * Not working
-     * Recommended way?
+     * LazyInitializationException
      */
     @Test
     @Transactional
     void testNoFollowersExistByCollectionHibernateInitialize() {
-        userService.follow(userA.id, userB.id);
-        Hibernate.initialize(userA.getFollowers()); //not working
+        Hibernate.initialize(userA.getFollowers());
+        assertEquals(0, userA.getFollowing().size()); //fails
+    }
+
+    /**
+     * Not supported for JTA entity managers
+     */
+    @Test
+    void testNoFollowersExistWithEMTx() {
+        entityManager.getTransaction().begin();
+        assertEquals(0, userA.getFollowing().size()); //fails
+        entityManager.getTransaction().commit();
+    }
+
+    /**
+     * Entity not managed
+     * Entity is "detached" as the new Session of this test
+     * does not contain the entity
+     */
+    @Test
+    @Transactional
+    void testNoFollowersExistWithSession() {
+        entityManager.unwrap(Session.class).refresh(userA);
+        assertEquals(0, userA.getFollowing().size()); //fails
+    }
+
+    /**
+     * Entity not managed
+     * Entity is "reattached" before
+     * https://stackoverflow.com/questions/912659/what-is-the-proper-way-to-re-attach-detached-objects-in-hibernate
+     */
+    @Test
+    @Transactional
+    void testNoFollowersExistMergeReattach() {
+        entityManager.merge(userA);
+        entityManager.unwrap(Session.class).refresh(userA);
+        assertEquals(0, userA.getFollowing().size()); //fails
+    }
+
+    /**
+     * Entity not managed
+     * Entity is "detached" as the new Session of this test
+     * does not contain the entity
+     */
+    @Test
+    @Transactional
+    void testNoFollowersExistEntityManagerRefresh() {
+        entityManager.refresh(userA);
         assertEquals(0, userA.getFollowing().size()); //fails
     }
 
@@ -135,7 +186,7 @@ class UserServiceTest {
         userService.follow(userA.id, userB.id);
 
         /*
-         * Why do I need to reload here in order to access the collection with getFollowing?
+         * Reload to prevent LazyInitializationException
          */
         userA = userRepository.findById(userA.id);
 
@@ -147,10 +198,20 @@ class UserServiceTest {
          */
         userService.unfollow(userA.id, userB.id, true);
 
+        /*
+         * Reloading the user after changes made
+         */
         userA = userRepository.findById(1L);
 
-        assertEquals(0, userService.getFollowingCount(userA.id)); //select call - succeeds
-        assertEquals(0, userA.getFollowing().size()); // fails
+        /*
+         * This call succeeds - the database has been updated
+         */
+        assertEquals(0, userService.getFollowingCount(userA.id)); // succeeds
+
+        /*
+         * This call fails - the Panache Repository has not loaded the changes made to the database
+         */
+        assertEquals(0, userA.getFollowing().size());
     }
 
 
